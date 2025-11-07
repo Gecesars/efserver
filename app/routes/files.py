@@ -14,6 +14,9 @@ def _build_permission_cache():
 
 
 def _has_access(file_obj, permissions, require_write=False):
+    if current_user.is_admin():
+        return True
+
     if file_obj.owner_id == current_user.id:
         return True
 
@@ -75,11 +78,14 @@ def list_files():
             return jsonify({'error': 'Permission denied'}), 403
         items = File.query.filter_by(parent_id=parent_id).all()
     else:
-        candidates = File.query.filter_by(parent_id=None).all()
-        items = []
-        for file_obj in candidates:
-            if file_obj.owner_id == current_user.id or _has_access(file_obj, permissions):
-                items.append(file_obj)
+        if current_user.is_admin():
+            items = File.query.filter_by(parent_id=None).all()
+        else:
+            candidates = File.query.filter_by(parent_id=None).all()
+            items = []
+            for file_obj in candidates:
+                if file_obj.owner_id == current_user.id or _has_access(file_obj, permissions):
+                    items.append(file_obj)
 
     def _sort_key(file_obj):
         folder_key = 0 if file_obj.is_folder else 1

@@ -38,6 +38,8 @@ def create_app(config_class=Config):
 
     from app import cli
     app.cli.add_command(cli.init_db_command)
+    app.cli.add_command(cli.create_admin_command)
+    app.cli.add_command(cli.sync_uploads_command)
 
     return app
 
