@@ -123,60 +123,74 @@ def upload_file():
     target_folder = None
     storage_owner_id = current_user.id
 
-    if parent_id is not None:
-        target_folder = File.query.get_or_404(parent_id)
-        if not target_folder.is_folder:
-            return jsonify({'error': 'Invalid destination'}), 400
-        if not _has_access(target_folder, permissions, require_write=True):
-            return jsonify({'error': 'Permission denied'}), 403
-        storage_owner_id = target_folder.owner_id
+    try:
+        current_app.logger.info(
+            'Uploading file "%s" (size=%s) parent_id=%s relative_path=%s user=%s',
+            file.filename,
+            getattr(file, 'content_length', None) or getattr(file, 'content_length', None),
+            parent_id,
+            relative_path,
+            current_user.id
+        )
 
-    filename = secure_filename(file.filename)
-    destination_path = _resolve_disk_path(storage_owner_id, target_folder)
+        if parent_id is not None:
+            target_folder = File.query.get_or_404(parent_id)
+            if not target_folder.is_folder:
+                return jsonify({'error': 'Invalid destination'}), 400
+            if not _has_access(target_folder, permissions, require_write=True):
+                return jsonify({'error': 'Permission denied'}), 403
+            storage_owner_id = target_folder.owner_id
 
-    if relative_path:
-        path_parts = [part for part in relative_path.split('/') if part]
-        if len(path_parts) > 1:
-            current_parent_id = parent_id
-            for raw_part in path_parts[:-1]:
-                part = _sanitize_folder_name(raw_part)
-                if not part:
-                    continue
-                folder = File.query.filter_by(
-                    owner_id=storage_owner_id,
-                    parent_id=current_parent_id,
-                    filename=part,
-                    is_folder=True
-                ).first()
-                if not folder:
-                    folder = File(
-                        filename=part,
+        filename = secure_filename(file.filename)
+        destination_path = _resolve_disk_path(storage_owner_id, target_folder)
+
+        if relative_path:
+            path_parts = [part for part in relative_path.split('/') if part]
+            if len(path_parts) > 1:
+                current_parent_id = parent_id
+                for raw_part in path_parts[:-1]:
+                    part = _sanitize_folder_name(raw_part)
+                    if not part:
+                        continue
+                    folder = File.query.filter_by(
                         owner_id=storage_owner_id,
                         parent_id=current_parent_id,
+                        filename=part,
                         is_folder=True
-                    )
-                    db.session.add(folder)
-                    db.session.commit()
-                current_parent_id = folder.id
-                destination_path = os.path.join(destination_path, part)
-            parent_id = current_parent_id
+                    ).first()
+                    if not folder:
+                        folder = File(
+                            filename=part,
+                            owner_id=storage_owner_id,
+                            parent_id=current_parent_id,
+                            is_folder=True
+                        )
+                        db.session.add(folder)
+                        db.session.commit()
+                    current_parent_id = folder.id
+                    destination_path = os.path.join(destination_path, part)
+                parent_id = current_parent_id
 
-    os.makedirs(destination_path, exist_ok=True)
-    file_path = os.path.join(destination_path, filename)
-    temp_file_path = file_path + '.uploading'
-    file.save(temp_file_path)
-    os.replace(temp_file_path, file_path)
+        os.makedirs(destination_path, exist_ok=True)
+        file_path = os.path.join(destination_path, filename)
+        temp_file_path = file_path + '.uploading'
+        file.save(temp_file_path)
+        os.replace(temp_file_path, file_path)
 
-    new_file = File(
-        filename=filename,
-        owner_id=storage_owner_id,
-        parent_id=parent_id,
-        is_folder=False
-    )
-    db.session.add(new_file)
-    db.session.commit()
-
-    return jsonify(new_file.to_dict()), 201
+        new_file = File(
+            filename=filename,
+            owner_id=storage_owner_id,
+            parent_id=parent_id,
+            is_folder=False
+        )
+        db.session.add(new_file)
+        db.session.commit()
+        current_app.logger.info('Upload completed: "%s" id=%s user=%s', filename, new_file.id, current_user.id)
+        return jsonify(new_file.to_dict()), 201
+    except Exception as exc:
+        current_app.logger.exception('Upload failed for "%s": %s', file.filename, exc)
+        db.session.rollback()
+        return jsonify({'error': 'File upload failed'}), 500
 
 
 @bp.route('/files/download/<int:file_id>', methods=['GET'])

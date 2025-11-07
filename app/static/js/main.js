@@ -171,6 +171,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function uploadFile({ file, relativePath, parentId, onProgress }) {
+        let xhr = null;
         return new Promise((resolve, reject) => {
             const formData = new FormData();
             formData.append('file', file);
@@ -181,7 +182,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 formData.append('relative_path', relativePath);
             }
 
-            const xhr = new XMLHttpRequest();
+            xhr = new XMLHttpRequest();
             let lastLoaded = 0;
 
             xhr.upload.addEventListener('progress', (event) => {
@@ -208,8 +209,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
 
-            xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
-            xhr.send(formData);
+            xhr.addEventListener('error', () => {
+                reject(new Error('Network error during upload'));
+            });
+
+            try {
+                xhr.send(formData);
+            } catch (sendError) {
+                reject(sendError);
+            }
         });
     }
 
