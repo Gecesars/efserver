@@ -25,6 +25,22 @@
         </div>
     </div>
 
+    {% if current_user.is_authenticated and current_user.role and current_user.role.name == 'Admin' %}
+    <div class="alert alert-primary d-flex align-items-center justify-content-between" role="alert">
+        <div>
+            <strong>Admin Tools:</strong> gerencie usuários e permissões diretamente do painel administrativo.
+        </div>
+        <div class="btn-group">
+            <a class="btn btn-sm btn-light" href="{{ url_for('admin.list_users') }}">
+                <i class="bi bi-people-fill me-1"></i> Usuários
+            </a>
+            <a class="btn btn-sm btn-outline-light" href="{{ url_for('admin.admin_dashboard') }}">
+                <i class="bi bi-sliders me-1"></i> Painel
+            </a>
+        </div>
+    </div>
+    {% endif %}
+
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb" id="breadcrumb-nav">
             <li class="breadcrumb-item"><a href="#" data-folder-id="null">Home</a></li>
