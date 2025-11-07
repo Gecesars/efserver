@@ -499,17 +499,21 @@ document.addEventListener('DOMContentLoaded', function () {
             const response = await fetch(`/api/files/${fileId}`, {
                 method: 'DELETE'
             });
+
+            const payload = await response.json().catch(() => ({}));
+
             if (response.status === 403) {
-                alert('Você não tem permissão para excluir este item.');
+                alert(payload.error || 'Você não tem permissão para excluir este item.');
                 return;
             }
             if (!response.ok) {
-                throw new Error('Failed to delete item');
+                throw new Error(payload.error || 'Failed to delete item');
             }
+
             fetchAndRenderFiles(currentParentId);
         } catch (error) {
             console.error('Delete failed', error);
-            alert('Não foi possível excluir o item. Tente novamente.');
+            alert(error.message || 'Não foi possível excluir o item. Tente novamente.');
         } finally {
             toggleButtonSpinner(button, false);
         }

@@ -221,11 +221,22 @@ def delete_file(file_id):
     if not _has_access(file_obj, permissions, require_write=True):
         return jsonify({'error': 'Permission denied'}), 403
 
-    _delete_file_tree(file_obj)
-    db.session.delete(file_obj)
-    db.session.commit()
-
-    return jsonify({'status': 'deleted', 'id': file_id})
+    try:
+        current_app.logger.info(
+            'Deleting file "%s" (id=%s, folder=%s) requested by user=%s',
+            file_obj.filename,
+            file_obj.id,
+            file_obj.is_folder,
+            current_user.id
+        )
+        _delete_file_tree(file_obj)
+        db.session.delete(file_obj)
+        db.session.commit()
+        return jsonify({'status': 'deleted', 'id': file_id})
+    except Exception as exc:
+        current_app.logger.exception('Failed to delete file "%s": %s', file_obj.filename, exc)
+        db.session.rollback()
+        return jsonify({'error': 'Failed to delete file'}), 500
 
 
 @bp.route('/files/download/<int:file_id>', methods=['GET'])
