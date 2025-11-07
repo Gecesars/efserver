@@ -46,6 +46,16 @@ body {
     color: #6c757d;
 }
 
+.file-card-wrapper {
+    position: relative;
+}
+
+.file-card .form-check {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+}
+
 .file-card-name {
     font-weight: 600;
     white-space: nowrap;

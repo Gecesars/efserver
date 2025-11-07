@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const bulkDeleteButton = document.getElementById('bulk-delete-button');
     const selectionCountLabel = document.getElementById('selection-count');
     const selectionToggleButton = document.getElementById('toggle-selection-button');
+    const selectionOptions = document.getElementById('selection-options');
     let transferHideTimeout = null;
 
     let currentParentId = null;
@@ -286,6 +287,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (bulkActions) {
             bulkActions.classList.toggle('d-none', !selectionMode || count === 0);
         }
+        if (selectionOptions) {
+            selectionOptions.classList.toggle('d-none', !selectionMode);
+        }
 
         if (bulkDownloadButton) {
             bulkDownloadButton.disabled = count === 0;
@@ -308,6 +312,33 @@ document.addEventListener('DOMContentLoaded', function () {
     if (selectionToggleButton) {
         selectionToggleButton.addEventListener('click', () => {
             setSelectionMode(!selectionMode);
+        });
+    }
+
+    if (selectionOptions) {
+        selectionOptions.querySelectorAll('.selection-action').forEach(action => {
+            action.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (!selectionMode) {
+                    setSelectionMode(true);
+                }
+                const mode = action.dataset.selection;
+                switch (mode) {
+                    case 'all':
+                        currentFiles.forEach(file => selectedIds.add(file.id));
+                        break;
+                    case 'files':
+                        selectedIds.clear();
+                        currentFiles.filter(file => !file.is_folder).forEach(file => selectedIds.add(file.id));
+                        break;
+                    case 'folders':
+                        selectedIds.clear();
+                        currentFiles.filter(file => file.is_folder).forEach(file => selectedIds.add(file.id));
+                        break;
+                }
+                updateSelectionUI();
+                renderFiles();
+            });
         });
     }
 
@@ -444,6 +475,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             currentFiles = await response.json();
+            const validIds = new Set(currentFiles.map(file => file.id));
+            [...selectedIds].forEach(id => {
+                if (!validIds.has(id)) {
+                    selectedIds.delete(id);
+                }
+            });
             renderFiles();
         } catch (error) {
             console.error('Failed to fetch files:', error);
@@ -824,6 +861,93 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    if (bulkDownloadButton) {
+        bulkDownloadButton.addEventListener('click', async () => {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            try {
+                setTransferStatus({
+                    active: true,
+                    message: 'Preparando download...',
+                    percent: null,
+                    variant: 'info',
+                    indeterminate: true
+                });
+                const response = await fetch('/api/files/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => ({}));
+                    throw new Error(payload.error || 'Falha ao preparar download');
+                }
+                const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition');
+                const defaultName = ids.length === 1
+                    ? (currentFiles.find(file => file.id === ids[0])?.filename || 'download')
+                    : 'arquivos.zip';
+                const filename = getFilenameFromDisposition(disposition) || defaultName;
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+                setTransferStatus({
+                    active: true,
+                    message: 'Download pronto!',
+                    percent: 100,
+                    detail: `${ids.length} item(ns) preparado(s).`,
+                    variant: 'success'
+                });
+                hideTransferStatus();
+            } catch (error) {
+                console.error('Bulk download failed', error);
+                setTransferStatus({
+                    active: true,
+                    message: 'Falha no download',
+                    percent: null,
+                    detail: error.message || 'Tente novamente mais tarde.',
+                    variant: 'danger',
+                    indeterminate: true
+                });
+                hideTransferStatus(4000);
+            }
+        });
+    }
+
+    if (bulkDeleteButton) {
+        bulkDeleteButton.addEventListener('click', async () => {
+            const ids = getSelectedIds();
+            if (!ids.length) return;
+            const confirmed = window.confirm(`Deseja realmente excluir ${ids.length} item(ns)? Esta ação não pode ser desfeita.`);
+            if (!confirmed) return;
+            toggleButtonSpinner(bulkDeleteButton, true);
+            try {
+                const response = await fetch('/api/files/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Falha ao excluir');
+                }
+                alert('Itens excluídos com sucesso.');
+                selectedIds.clear();
+                fetchAndRenderFiles(currentParentId);
+            } catch (error) {
+                console.error('Bulk delete failed', error);
+                alert(error.message || 'Não foi possível excluir os itens.');
+            } finally {
+                toggleButtonSpinner(bulkDeleteButton, false);
+            }
+        });
+    }
+
     fileContainer.addEventListener('click', async (e) => {
         const downloadBtn = e.target.closest('.download-btn');
         if (downloadBtn) {
@@ -867,13 +991,20 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const entry = e.target.closest('[data-file-entry="true"]');
-        if (entry && entry.dataset.isFolder === 'true' && !e.target.closest('.download-btn') && !e.target.closest('.delete-btn')) {
-            e.stopPropagation();
-            const folderId = parseInt(entry.dataset.fileId, 10);
-            const folderName = entry.dataset.fileName;
-            breadcrumbState.push({ folderId, folderName });
-            updateBreadcrumb();
-            fetchAndRenderFiles(folderId);
+        if (entry) {
+            const fileId = parseInt(entry.dataset.fileId, 10);
+            const isFolder = entry.dataset.isFolder === 'true';
+            if (selectionMode && !e.target.closest('.download-btn') && !e.target.closest('.delete-btn')) {
+                toggleSelection(fileId);
+                renderFiles();
+                return;
+            }
+            if (isFolder && !e.target.closest('.download-btn') && !e.target.closest('.delete-btn')) {
+                e.stopPropagation();
+                breadcrumbState.push({ folderId: fileId, folderName: entry.dataset.fileName });
+                updateBreadcrumb();
+                fetchAndRenderFiles(fileId);
+            }
         }
     });
 });

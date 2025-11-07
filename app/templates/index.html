@@ -23,19 +23,31 @@
             </ul>
         </div>
         <div class="ms-auto d-flex flex-wrap gap-2 align-items-center">
-            <div class="selection-info d-flex align-items-center gap-2">
-                <button class="btn btn-outline-secondary" id="toggle-selection-button">
+            <div class="selection-info d-flex flex-wrap align-items-center gap-2">
+                <button class="btn btn-outline-secondary" id="toggle-selection-button" type="button">
                     <i class="bi bi-check2-square me-1"></i> Selecionar
                 </button>
                 <span id="selection-count" class="text-muted d-none">0 selecionado(s)</span>
-            </div>
-            <div class="btn-group d-none" id="bulk-actions">
-                <button class="btn btn-outline-secondary" id="bulk-download-button" disabled>
-                    <i class="bi bi-download me-1"></i> Baixar
-                </button>
-                <button class="btn btn-outline-danger" id="bulk-delete-button" disabled>
-                    <i class="bi bi-trash me-1"></i> Excluir
-                </button>
+                <div class="dropdown d-none" id="selection-options">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Selecionar...
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item selection-action" href="#" data-selection="all">Selecionar tudo</a></li>
+                        <li><a class="dropdown-item selection-action" href="#" data-selection="files">Somente arquivos</a></li>
+                        <li><a class="dropdown-item selection-action" href="#" data-selection="folders">Somente pastas</a></li>
+                    </ul>
+                </div>
+                <div class="btn-group d-none" id="bulk-actions">
+                    <button class="btn btn-outline-secondary" id="bulk-download-button" type="button" disabled>
+                        <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                        <i class="bi bi-download"></i> Baixar
+                    </button>
+                    <button class="btn btn-outline-danger" id="bulk-delete-button" type="button" disabled>
+                        <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                        <i class="bi bi-trash"></i> Excluir
+                    </button>
+                </div>
             </div>
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#newFolderModal">
                 <i class="bi bi-folder-plus me-1"></i> Nova Pasta
