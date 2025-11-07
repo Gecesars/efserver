@@ -69,10 +69,9 @@ def _sanitize_folder_name(name):
 def _delete_file_tree(file_obj):
     """Remove registros e arquivos físicos associados a um File."""
     if file_obj.is_folder:
-        children = list(file_obj.children)
+        children = list(file_obj.children.order_by(File.id))
         for child in children:
             _delete_file_tree(child)
-            db.session.delete(child)
         folder_path = _resolve_disk_path(file_obj.owner_id, file_obj)
         if os.path.isdir(folder_path):
             shutil.rmtree(folder_path, ignore_errors=True)
