@@ -3,17 +3,35 @@ import os
 import shutil
 from flask import render_template, redirect, url_for, flash, Blueprint, request, current_app
 from flask_login import login_required
+from flask import render_template, redirect, url_for, flash, Blueprint, request, current_app
 from app.models import User, Role, File, UserFilePermission
 from app.forms import UserForm
 from app import db
+from app.routes.files import _delete_file_tree, _entry_exists
 
 bp = Blueprint('admin', __name__)
 
 from app.decorators import admin_required
 
 
-def _build_folder_rows():
+def _get_existing_folders():
     folders = File.query.filter_by(is_folder=True).all()
+    cleaned = []
+    removed = False
+    for folder in folders:
+        if _entry_exists(folder):
+            cleaned.append(folder)
+        else:
+            _delete_file_tree(folder)
+            db.session.delete(folder)
+            removed = True
+    if removed:
+        db.session.commit()
+    return cleaned
+
+
+def _build_folder_rows():
+    folders = _get_existing_folders()
     children = defaultdict(list)
 
     for folder in folders:
