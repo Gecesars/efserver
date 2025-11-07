@@ -109,7 +109,14 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
 
-    parent_id = request.form.get('parent_id', type=int)
+    raw_parent = request.form.get('parent_id')
+    parent_id = None
+    if raw_parent not in (None, '', 'null'):
+        try:
+            parent_id = int(raw_parent)
+        except ValueError:
+            return jsonify({'error': 'Invalid parent id'}), 400
+
     relative_path = request.form.get('relative_path')
     permissions = _build_permission_cache()
 
@@ -156,7 +163,9 @@ def upload_file():
 
     os.makedirs(destination_path, exist_ok=True)
     file_path = os.path.join(destination_path, filename)
-    file.save(file_path)
+    temp_file_path = file_path + '.uploading'
+    file.save(temp_file_path)
+    os.replace(temp_file_path, file_path)
 
     new_file = File(
         filename=filename,
