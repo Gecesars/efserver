@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mt-4">Manage Permissions for {{ user.username }}</h1>
+    <form method="POST" action="{{ url_for('admin.manage_user_permissions', id=user.id) }}">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Folder</th>
+                    <th>Can Read</th>
+                    <th>Can Write</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for folder in folders %}
+                <tr>
+                    <td>{{ folder.filename }}</td>
+                    <td><input type="checkbox" name="read_{{ folder.id }}" value="1" {% if user_permissions.get(folder.id) and user_permissions.get(folder.id).can_read %}checked{% endif %}></td>
+                    <td><input type="checkbox" name="write_{{ folder.id }}" value="1" {% if user_permissions.get(folder.id) and user_permissions.get(folder.id).can_write %}checked{% endif %}></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button type="submit" class="btn btn-primary">Save Permissions</button>
+    </form>
+</div>
+{% endblock %}

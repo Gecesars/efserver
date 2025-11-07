@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Login
+Flask-WTF
+psycopg2-binary
+python-dotenv
+gunicorn
+passlib==1.7.4
+bcrypt==4.0.1

@@ -1,0 +1,16 @@
+/* General body style to complement Bootstrap */
+body {
+    background-color: #f8f9fa;
+}
+
+/* Add hover effect to file list table */
+.table-hover tbody tr:hover {
+    background-color: #f1f1f1;
+    cursor: pointer;
+}
+
+/* Style for file/folder icons */
+.file-icon {
+    font-size: 1.2rem;
+    margin-right: 10px;
+}
