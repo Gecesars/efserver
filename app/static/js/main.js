@@ -140,11 +140,11 @@ document.addEventListener('DOMContentLoaded', function () {
                     <td>${fileType}</td>
                     <td>${date}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-secondary download-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                        <button type="button" class="btn btn-sm btn-outline-secondary download-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
                             <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
                             <i class="bi bi-download"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-danger delete-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
                             <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
                             <i class="bi bi-trash"></i>
                         </button>
