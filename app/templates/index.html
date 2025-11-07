@@ -41,6 +41,19 @@
     </div>
     {% endif %}
 
+    <div id="transfer-status" class="alert alert-info d-none" role="status">
+        <div class="d-flex align-items-center gap-3">
+            <div class="spinner-border spinner-border-sm" id="transfer-spinner" role="status" aria-hidden="true"></div>
+            <div class="flex-grow-1">
+                <div id="transfer-status-message" class="fw-semibold">Transferindo...</div>
+                <div class="progress my-2" style="height: 6px;">
+                    <div class="progress-bar" id="transfer-progress" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small id="transfer-status-detail" class="text-muted d-block"></small>
+            </div>
+        </div>
+    </div>
+
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb" id="breadcrumb-nav">
             <li class="breadcrumb-item"><a href="#" data-folder-id="null">Home</a></li>

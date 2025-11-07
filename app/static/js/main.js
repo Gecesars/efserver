@@ -13,10 +13,80 @@ document.addEventListener('DOMContentLoaded', function () {
     const uploadFolderButton = document.getElementById('upload-folder-button');
     const folderInput = document.getElementById('folder-input');
     const uploadFolderStatus = document.getElementById('upload-folder-status');
+    const transferStatus = document.getElementById('transfer-status');
+    const transferStatusMessage = document.getElementById('transfer-status-message');
+    const transferStatusDetail = document.getElementById('transfer-status-detail');
+    const transferProgressBar = document.getElementById('transfer-progress');
+    const transferSpinner = document.getElementById('transfer-spinner');
+    let transferHideTimeout = null;
 
     let currentParentId = null;
     let breadcrumbState = [{folderId: null, folderName: 'Home'}];
     let currentSort = 'name';
+
+    function formatDuration(seconds) {
+        if (!seconds || !isFinite(seconds) || seconds <= 0) {
+            return null;
+        }
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.max(1, Math.round(seconds % 60));
+        if (minutes > 0) {
+            return `${minutes}m ${secs}s`;
+        }
+        return `${secs}s`;
+    }
+
+    function setTransferStatus({ active = true, message = '', percent = null, etaSeconds = null, detail = '', variant = 'info', indeterminate = false } = {}) {
+        if (!transferStatus) return;
+        if (transferHideTimeout) {
+            clearTimeout(transferHideTimeout);
+            transferHideTimeout = null;
+        }
+        if (!active) {
+            transferStatus.classList.add('d-none');
+            transferProgressBar.style.width = '0%';
+            transferProgressBar.setAttribute('aria-valuenow', '0');
+            transferProgressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+            transferSpinner.classList.remove('d-none');
+            transferStatusDetail.textContent = '';
+            return;
+        }
+        transferStatus.classList.remove('d-none');
+        transferStatus.classList.remove('alert-info', 'alert-success', 'alert-danger');
+        transferStatus.classList.add(`alert-${variant}`);
+        transferStatusMessage.textContent = message;
+
+        const showSpinner = indeterminate || percent === null || percent < 100;
+        transferSpinner.classList.toggle('d-none', !showSpinner);
+
+        if (percent === null || indeterminate) {
+            transferProgressBar.style.width = '100%';
+            transferProgressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+            transferProgressBar.setAttribute('aria-valuenow', '100');
+        } else {
+            const safePercent = Math.min(100, Math.max(0, percent));
+            transferProgressBar.style.width = `${safePercent}%`;
+            transferProgressBar.setAttribute('aria-valuenow', safePercent.toFixed(0));
+            transferProgressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+        }
+
+        if (detail) {
+            transferStatusDetail.textContent = detail;
+        } else if (etaSeconds && isFinite(etaSeconds)) {
+            const etaText = formatDuration(etaSeconds);
+            transferStatusDetail.textContent = etaText ? `Tempo restante estimado: ${etaText}` : 'Calculando tempo restante...';
+        } else {
+            transferStatusDetail.textContent = 'Calculando tempo restante...';
+        }
+    }
+
+    function hideTransferStatus(delay = 1500) {
+        if (!transferStatus) return;
+        if (transferHideTimeout) {
+            clearTimeout(transferHideTimeout);
+        }
+        transferHideTimeout = setTimeout(() => setTransferStatus({ active: false }), delay);
+    }
 
     function updateBreadcrumb() {
         breadcrumbNav.innerHTML = '';
@@ -100,27 +170,47 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    async function uploadFile(file, relativePath) {
-        const formData = new FormData();
-        formData.append('file', file);
-        if (currentParentId) {
-            formData.append('parent_id', currentParentId);
-        }
-        formData.append('relative_path', relativePath);
+    function uploadFile({ file, relativePath, parentId, onProgress }) {
+        return new Promise((resolve, reject) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            if (typeof parentId === 'number') {
+                formData.append('parent_id', parentId);
+            }
+            if (relativePath) {
+                formData.append('relative_path', relativePath);
+            }
 
-        try {
-            const response = await fetch('/api/files/upload', {
-                method: 'POST',
-                body: formData
+            const xhr = new XMLHttpRequest();
+            let lastLoaded = 0;
+
+            xhr.upload.addEventListener('progress', (event) => {
+                if (!onProgress || !event.lengthComputable) {
+                    return;
+                }
+                const delta = event.loaded - lastLoaded;
+                lastLoaded = event.loaded;
+                onProgress(delta > 0 ? delta : 0, event.loaded, event.total);
             });
 
-            if (!response.ok) {
-                throw new Error('Upload failed');
-            }
-        } catch (error) {
-            console.error('Upload error:', error);
-            alert(`Upload failed for ${file.name}. Please try again.`);
-        }
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    if (onProgress) {
+                        const totalSize = file.size || lastLoaded;
+                        const remainingDelta = totalSize - lastLoaded;
+                        if (remainingDelta > 0) {
+                            onProgress(remainingDelta, totalSize, totalSize);
+                        }
+                    }
+                    resolve(JSON.parse(xhr.responseText));
+                } else {
+                    reject(new Error(`Upload failed with status ${xhr.status}`));
+                }
+            });
+
+            xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+            xhr.send(formData);
+        });
     }
 
     sortByDropdown.addEventListener('click', (e) => {
@@ -147,7 +237,12 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        await uploadFile(file, file.name);
+        try {
+            await uploadFile({ file, relativePath: file.name, parentId: currentParentId ?? null });
+        } catch (error) {
+            console.error('Upload error:', error);
+            alert(`Upload failed for ${file.name}. Please try again.`);
+        }
         uploadModal.hide();
         fetchAndRenderFiles(currentParentId);
     });
@@ -178,23 +273,82 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     uploadFolderButton.addEventListener('click', async () => {
-        const files = folderInput.files;
+        const files = Array.from(folderInput.files);
         if (files.length === 0) {
             alert('Please select a folder to upload.');
             return;
         }
 
+        const parentIdSnapshot = currentParentId ?? null;
+        const totalBytes = files.reduce((sum, file) => sum + (file.size || 0), 0);
+        const startTime = performance.now();
+        let uploadedBytes = 0;
+        let uploadedFilesCount = 0;
+
         updateUploadFolderUI({ loading: true, message: `Uploading ${files.length} files...`, variant: 'info' });
+        setTransferStatus({
+            active: true,
+            message: `Enviando ${files.length} arquivos...`,
+            percent: totalBytes ? 0 : null,
+            etaSeconds: null,
+            variant: 'info',
+            indeterminate: totalBytes === 0
+        });
+
+        const handleProgress = (delta = 0) => {
+            uploadedBytes += delta;
+            const elapsedSeconds = (performance.now() - startTime) / 1000;
+            const speed = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
+            const remainingBytes = totalBytes - uploadedBytes;
+            const etaSeconds = speed > 0 && remainingBytes > 0 ? remainingBytes / speed : null;
+            const percent = totalBytes ? (uploadedBytes / totalBytes) * 100 : (uploadedFilesCount / files.length) * 100;
+            setTransferStatus({
+                active: true,
+                message: `Enviando ${files.length} arquivos (${Math.min(percent, 100).toFixed(0)}%)`,
+                percent: totalBytes ? percent : Math.min(100, percent),
+                etaSeconds: etaSeconds || null,
+                variant: 'info',
+                indeterminate: totalBytes === 0
+            });
+        };
+
         try {
             for (const file of files) {
-                await uploadFile(file, file.webkitRelativePath);
+                await uploadFile({
+                    file,
+                    relativePath: file.webkitRelativePath,
+                    parentId: parentIdSnapshot,
+                    onProgress: handleProgress
+                });
+                uploadedFilesCount += 1;
+                if (totalBytes === 0) {
+                    handleProgress(0);
+                }
             }
             uploadFolderModal.hide();
             fetchAndRenderFiles(currentParentId);
             updateUploadFolderUI({ loading: false, message: 'Upload completed!', variant: 'success', autoHide: true });
+            setTransferStatus({
+                active: true,
+                message: 'Upload concluído!',
+                percent: 100,
+                detail: `${files.length} arquivos enviados.`,
+                variant: 'success',
+                indeterminate: false
+            });
+            hideTransferStatus();
         } catch (error) {
             console.error('Folder upload failed', error);
             updateUploadFolderUI({ loading: false, message: 'Folder upload failed. Please try again.', variant: 'danger' });
+            setTransferStatus({
+                active: true,
+                message: 'Falha no upload da pasta.',
+                percent: null,
+                detail: 'Verifique sua conexão e tente novamente.',
+                variant: 'danger',
+                indeterminate: true
+            });
+            hideTransferStatus(4000);
         }
     });
 
@@ -241,23 +395,87 @@ document.addEventListener('DOMContentLoaded', function () {
 
     async function downloadFolder(button, fileId, filename) {
         toggleButtonSpinner(button, true);
+        setTransferStatus({
+            active: true,
+            message: `Preparando "${filename}"...`,
+            percent: null,
+            etaSeconds: null,
+            variant: 'info',
+            indeterminate: true
+        });
         try {
             const response = await fetch(`/api/files/download/${fileId}`);
             if (!response.ok) {
                 throw new Error('Failed to download folder');
             }
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${filename}.zip`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+
+            const contentLength = Number(response.headers.get('Content-Length'));
+            const chunks = [];
+            let received = 0;
+            const startTime = performance.now();
+
+            if (response.body && response.body.getReader && contentLength) {
+                const reader = response.body.getReader();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    const percent = (received / contentLength) * 100;
+                    const elapsedSeconds = (performance.now() - startTime) / 1000;
+                    const speed = elapsedSeconds > 0 ? received / elapsedSeconds : 0;
+                    const remainingBytes = contentLength - received;
+                    const etaSeconds = speed > 0 ? remainingBytes / speed : null;
+                    setTransferStatus({
+                        active: true,
+                        message: `Baixando "${filename}" (${Math.min(percent, 100).toFixed(0)}%)`,
+                        percent,
+                        etaSeconds,
+                        variant: 'info'
+                    });
+                }
+                const blob = new Blob(chunks, { type: 'application/zip' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${filename}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+            } else {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${filename}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+            }
+
+            setTransferStatus({
+                active: true,
+                message: `Download de "${filename}" concluído!`,
+                percent: 100,
+                detail: 'Arquivo zip pronto.',
+                variant: 'success',
+                indeterminate: false
+            });
+            hideTransferStatus();
         } catch (error) {
             console.error(error);
             alert('Failed to download folder. Please try again.');
+            setTransferStatus({
+                active: true,
+                message: 'Falha ao baixar a pasta.',
+                percent: null,
+                detail: 'Não foi possível preparar o download.',
+                variant: 'danger',
+                indeterminate: true
+            });
+            hideTransferStatus(4000);
         } finally {
             toggleButtonSpinner(button, false);
         }
