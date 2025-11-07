@@ -1,9 +1,11 @@
-from flask import Blueprint, jsonify, request, current_app, send_from_directory
+from flask import Blueprint, jsonify, request, current_app, send_from_directory, send_file, after_this_request
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from app.models import File, UserFilePermission
 from app import db
 import os
+import tempfile
+import zipfile
 
 bp = Blueprint('files', __name__)
 
@@ -176,6 +178,42 @@ def download_file(file_id):
 
     if not _has_access(file, permissions):
         return jsonify({'error': 'Permission denied'}), 403
+
+    if file.is_folder:
+        folder_path = _resolve_disk_path(file.owner_id, file)
+        if not os.path.exists(folder_path):
+            return jsonify({'error': 'Folder not found'}), 404
+
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip_path = temp_zip.name
+        temp_zip.close()
+
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(folder_path):
+                rel_root = os.path.relpath(root, folder_path)
+                if not files and not dirs:
+                    folder_entry = file.filename if rel_root == '.' else os.path.join(file.filename, rel_root)
+                    zipf.writestr(folder_entry.rstrip('/') + '/', '')
+                for fname in files:
+                    abs_path = os.path.join(root, fname)
+                    rel_path = os.path.relpath(abs_path, folder_path)
+                    arcname = os.path.join(file.filename, rel_path)
+                    zipf.write(abs_path, arcname=arcname)
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                os.remove(temp_zip_path)
+            except OSError:
+                pass
+            return response
+
+        return send_file(
+            temp_zip_path,
+            as_attachment=True,
+            download_name=f"{file.filename}.zip",
+            mimetype='application/zip'
+        )
 
     folder_path = _resolve_disk_path(file.owner_id, file.parent)
     return send_from_directory(folder_path, file.filename, as_attachment=True)

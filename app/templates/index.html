@@ -107,10 +107,14 @@
             <input class="form-control" type="file" id="folder-input" webkitdirectory directory required>
           </div>
         </form>
+        <div id="upload-folder-status" class="alert alert-info d-none" role="status"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" id="upload-folder-button">Upload</button>
+        <button type="button" class="btn btn-primary" id="upload-folder-button">
+            <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+            Upload
+        </button>
       </div>
     </div>
   </div>

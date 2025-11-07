@@ -8,9 +8,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const folderNameInput = document.getElementById('folder-name-input');
     const breadcrumbNav = document.getElementById('breadcrumb-nav');
     const sortByDropdown = document.getElementById('sort-by-dropdown');
-    const uploadFolderModal = new bootstrap.Modal(document.getElementById('uploadFolderModal'));
+    const uploadFolderModalElement = document.getElementById('uploadFolderModal');
+    const uploadFolderModal = new bootstrap.Modal(uploadFolderModalElement);
     const uploadFolderButton = document.getElementById('upload-folder-button');
     const folderInput = document.getElementById('folder-input');
+    const uploadFolderStatus = document.getElementById('upload-folder-status');
 
     let currentParentId = null;
     let breadcrumbState = [{folderId: null, folderName: 'Home'}];
@@ -68,7 +70,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     <td>${fileType}</td>
                     <td>${date}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-secondary" data-file-id="${file.id}"><i class="bi bi-download"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary download-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                            <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                            <i class="bi bi-download"></i>
+                        </button>
                         <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
                     </td>
                 `;
@@ -144,6 +149,31 @@ document.addEventListener('DOMContentLoaded', function () {
         fetchAndRenderFiles(currentParentId);
     });
 
+    function updateUploadFolderUI({ loading = false, message = '', variant = 'info', autoHide = false }) {
+        if (uploadFolderStatus) {
+            if (message) {
+                uploadFolderStatus.textContent = message;
+                uploadFolderStatus.classList.remove('d-none', 'alert-info', 'alert-success', 'alert-danger');
+                uploadFolderStatus.classList.add(`alert-${variant}`);
+                if (autoHide) {
+                    setTimeout(() => uploadFolderStatus.classList.add('d-none'), 2000);
+                }
+            } else {
+                uploadFolderStatus.classList.add('d-none');
+            }
+        }
+        const spinner = uploadFolderButton.querySelector('.spinner-border');
+        if (spinner) {
+            spinner.classList.toggle('d-none', !loading);
+        }
+        uploadFolderButton.disabled = loading;
+    }
+
+    uploadFolderModalElement.addEventListener('hidden.bs.modal', () => {
+        folderInput.value = '';
+        updateUploadFolderUI({ loading: false, message: '' });
+    });
+
     uploadFolderButton.addEventListener('click', async () => {
         const files = folderInput.files;
         if (files.length === 0) {
@@ -151,12 +181,18 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        for (const file of files) {
-            await uploadFile(file, file.webkitRelativePath);
+        updateUploadFolderUI({ loading: true, message: `Uploading ${files.length} files...`, variant: 'info' });
+        try {
+            for (const file of files) {
+                await uploadFile(file, file.webkitRelativePath);
+            }
+            uploadFolderModal.hide();
+            fetchAndRenderFiles(currentParentId);
+            updateUploadFolderUI({ loading: false, message: 'Upload completed!', variant: 'success', autoHide: true });
+        } catch (error) {
+            console.error('Folder upload failed', error);
+            updateUploadFolderUI({ loading: false, message: 'Folder upload failed. Please try again.', variant: 'danger' });
         }
-
-        uploadFolderModal.hide();
-        fetchAndRenderFiles(currentParentId);
     });
 
     createFolderButton.addEventListener('click', async () => {
@@ -192,15 +228,56 @@ document.addEventListener('DOMContentLoaded', function () {
     updateBreadcrumb();
     fetchAndRenderFiles();
 
-    fileListBody.addEventListener('click', (e) => {
-        const target = e.target.closest('.btn-outline-secondary');
-        if (target) {
-            const fileId = target.dataset.fileId;
-            if (fileId) {
+    function toggleButtonSpinner(button, show) {
+        const spinner = button.querySelector('.spinner-border');
+        const icon = button.querySelector('i');
+        if (spinner) spinner.classList.toggle('d-none', !show);
+        if (icon) icon.classList.toggle('d-none', show);
+        button.disabled = show;
+    }
+
+    async function downloadFolder(button, fileId, filename) {
+        toggleButtonSpinner(button, true);
+        try {
+            const response = await fetch(`/api/files/download/${fileId}`);
+            if (!response.ok) {
+                throw new Error('Failed to download folder');
+            }
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${filename}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        } catch (error) {
+            console.error(error);
+            alert('Failed to download folder. Please try again.');
+        } finally {
+            toggleButtonSpinner(button, false);
+        }
+    }
+
+    fileListBody.addEventListener('click', async (e) => {
+        const downloadBtn = e.target.closest('.download-btn');
+        if (downloadBtn) {
+            e.stopPropagation();
+            const fileId = downloadBtn.dataset.fileId;
+            const isFolder = downloadBtn.dataset.isFolder === 'true';
+            const filename = downloadBtn.dataset.filename || 'download';
+            if (!fileId) {
+                return;
+            }
+
+            if (isFolder) {
+                await downloadFolder(downloadBtn, fileId, filename);
+            } else {
                 const downloadUrl = `/api/files/download/${fileId}`;
                 const a = document.createElement('a');
                 a.href = downloadUrl;
-                a.download = ''
+                a.download = '';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
