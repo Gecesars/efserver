@@ -988,6 +988,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
             await deleteItem(deleteBtn, fileId, isFolder, filename);
+            return;
         }
 
         const entry = e.target.closest('[data-file-entry="true"]');
