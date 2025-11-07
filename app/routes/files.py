@@ -66,6 +66,15 @@ def _sanitize_folder_name(name):
     return cleaned
 
 
+def _entry_exists(file_obj):
+    if file_obj.is_folder:
+        folder_path = _resolve_disk_path(file_obj.owner_id, file_obj)
+        return os.path.isdir(folder_path)
+    base_path = _resolve_disk_path(file_obj.owner_id, file_obj.parent)
+    file_path = os.path.join(base_path, file_obj.filename)
+    return os.path.isfile(file_path)
+
+
 def _delete_file_tree(file_obj):
     """Remove registros e arquivos físicos associados a um File."""
     if file_obj.is_folder:
@@ -81,6 +90,21 @@ def _delete_file_tree(file_obj):
             os.remove(file_path)
         except FileNotFoundError:
             pass
+
+
+def _prune_missing_entries(files):
+    removed = False
+    kept = []
+    for file_obj in files:
+        if _entry_exists(file_obj):
+            kept.append(file_obj)
+            continue
+        _delete_file_tree(file_obj)
+        db.session.delete(file_obj)
+        removed = True
+    if removed:
+        db.session.commit()
+    return kept
 
 
 @bp.route('/files', methods=['GET'])
@@ -106,6 +130,7 @@ def list_files():
             for file_obj in candidates:
                 if file_obj.owner_id == current_user.id or _has_access(file_obj, permissions):
                     items.append(file_obj)
+    items = _prune_missing_entries(items)
 
     def _sort_key(file_obj):
         folder_key = 0 if file_obj.is_folder else 1
