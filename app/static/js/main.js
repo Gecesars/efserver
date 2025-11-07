@@ -183,6 +183,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/files/upload', true);
             let lastLoaded = 0;
 
             xhr.upload.addEventListener('progress', (event) => {
