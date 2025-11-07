@@ -144,14 +144,17 @@ document.addEventListener('DOMContentLoaded', function () {
                             <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
                             <i class="bi bi-download"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        <button class="btn btn-sm btn-outline-danger delete-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                            <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </td>
                 `;
 
                 if (file.is_folder) {
                     row.style.cursor = 'pointer';
                     row.addEventListener('click', (e) => {
-                        if (e.target.closest('.download-btn')) {
+                        if (e.target.closest('.download-btn') || e.target.closest('.delete-btn')) {
                             return;
                         }
                         e.stopPropagation();
@@ -490,6 +493,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    async function deleteItem(button, fileId, isFolder, filename) {
+        toggleButtonSpinner(button, true);
+        try {
+            const response = await fetch(`/api/files/${fileId}`, {
+                method: 'DELETE'
+            });
+            if (response.status === 403) {
+                alert('Você não tem permissão para excluir este item.');
+                return;
+            }
+            if (!response.ok) {
+                throw new Error('Failed to delete item');
+            }
+            fetchAndRenderFiles(currentParentId);
+        } catch (error) {
+            console.error('Delete failed', error);
+            alert('Não foi possível excluir o item. Tente novamente.');
+        } finally {
+            toggleButtonSpinner(button, false);
+        }
+    }
+
     fileListBody.addEventListener('click', async (e) => {
         const downloadBtn = e.target.closest('.download-btn');
         if (downloadBtn) {
@@ -512,6 +537,24 @@ document.addEventListener('DOMContentLoaded', function () {
                 a.click();
                 document.body.removeChild(a);
             }
+            return;
+        }
+
+        const deleteBtn = e.target.closest('.delete-btn');
+        if (deleteBtn) {
+            e.stopPropagation();
+            const fileId = deleteBtn.dataset.fileId;
+            const isFolder = deleteBtn.dataset.isFolder === 'true';
+            const filename = deleteBtn.dataset.filename || '';
+            if (!fileId) {
+                return;
+            }
+            const label = isFolder ? 'pasta' : 'arquivo';
+            const confirmed = window.confirm(`Tem certeza que deseja excluir a ${label} "${filename}"? Esta ação não pode ser desfeita.`);
+            if (!confirmed) {
+                return;
+            }
+            await deleteItem(deleteBtn, fileId, isFolder, filename);
         }
     });
 });

@@ -5,7 +5,7 @@ __pycache__/
 
 # Virtual environments
 venv/
-.env/
+.env
 
 # Environment / editor files
 .DS_Store
@@ -13,9 +13,12 @@ venv/
 .idea/
 
 # Flask / instance assets
-instance/uploads/
-instance/*.db
-instance/*.sqlite
+instance/
+instance*.db
+instance*.sqlite
+
+# Keep placeholder if needed
+!.gitkeep
 
 # Logs
 *.log

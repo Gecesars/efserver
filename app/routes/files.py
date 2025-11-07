@@ -4,6 +4,7 @@ from werkzeug.utils import secure_filename
 from app.models import File, UserFilePermission
 from app import db
 import os
+import shutil
 import tempfile
 import zipfile
 
@@ -63,6 +64,24 @@ def _sanitize_folder_name(name):
     if '/' in cleaned or '\\' in cleaned:
         return ''
     return cleaned
+
+
+def _delete_file_tree(file_obj):
+    """Remove registros e arquivos físicos associados a um File."""
+    if file_obj.is_folder:
+        children = list(file_obj.children)
+        for child in children:
+            _delete_file_tree(child)
+            db.session.delete(child)
+        folder_path = _resolve_disk_path(file_obj.owner_id, file_obj)
+        if os.path.isdir(folder_path):
+            shutil.rmtree(folder_path, ignore_errors=True)
+    else:
+        file_path = os.path.join(_resolve_disk_path(file_obj.owner_id, file_obj.parent), file_obj.filename)
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            pass
 
 
 @bp.route('/files', methods=['GET'])
@@ -191,6 +210,22 @@ def upload_file():
         current_app.logger.exception('Upload failed for "%s": %s', file.filename, exc)
         db.session.rollback()
         return jsonify({'error': 'File upload failed'}), 500
+
+
+@bp.route('/files/<int:file_id>', methods=['DELETE'])
+@login_required
+def delete_file(file_id):
+    permissions = _build_permission_cache()
+    file_obj = File.query.get_or_404(file_id)
+
+    if not _has_access(file_obj, permissions, require_write=True):
+        return jsonify({'error': 'Permission denied'}), 403
+
+    _delete_file_tree(file_obj)
+    db.session.delete(file_obj)
+    db.session.commit()
+
+    return jsonify({'status': 'deleted', 'id': file_id})
 
 
 @bp.route('/files/download/<int:file_id>', methods=['GET'])
