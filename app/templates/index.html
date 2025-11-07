@@ -22,7 +22,21 @@
                 <li><a class="dropdown-item sort-option" href="#" data-sort-key="type" data-sort-direction="asc">Tipo</a></li>
             </ul>
         </div>
-        <div class="ms-auto d-flex flex-wrap gap-2">
+        <div class="ms-auto d-flex flex-wrap gap-2 align-items-center">
+            <div class="selection-info d-flex align-items-center gap-2">
+                <button class="btn btn-outline-secondary" id="toggle-selection-button">
+                    <i class="bi bi-check2-square me-1"></i> Selecionar
+                </button>
+                <span id="selection-count" class="text-muted d-none">0 selecionado(s)</span>
+            </div>
+            <div class="btn-group d-none" id="bulk-actions">
+                <button class="btn btn-outline-secondary" id="bulk-download-button" disabled>
+                    <i class="bi bi-download me-1"></i> Baixar
+                </button>
+                <button class="btn btn-outline-danger" id="bulk-delete-button" disabled>
+                    <i class="bi bi-trash me-1"></i> Excluir
+                </button>
+            </div>
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#newFolderModal">
                 <i class="bi bi-folder-plus me-1"></i> Nova Pasta
             </button>

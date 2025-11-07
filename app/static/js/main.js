@@ -19,6 +19,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const transferStatusDetail = document.getElementById('transfer-status-detail');
     const transferProgressBar = document.getElementById('transfer-progress');
     const transferSpinner = document.getElementById('transfer-spinner');
+    const bulkDownloadButton = document.getElementById('bulk-download-button');
+    const bulkDeleteButton = document.getElementById('bulk-delete-button');
+    const selectionCountLabel = document.getElementById('selection-count');
+    const selectionToggleButton = document.getElementById('toggle-selection-button');
     let transferHideTimeout = null;
 
     let currentParentId = null;
@@ -26,6 +30,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let currentFiles = [];
     let currentSort = { key: 'name', direction: 'asc' };
     let currentViewMode = 'details';
+    let selectionMode = false;
+    const selectedIds = new Set();
 
     function formatDuration(seconds) {
         if (!seconds || !isFinite(seconds) || seconds <= 0) {
@@ -152,6 +158,26 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
             renderGridView(files);
         }
+        updateSelectionUI();
+    }
+
+    function toggleSelection(id) {
+        if (selectedIds.has(id)) {
+            selectedIds.delete(id);
+        } else {
+            selectedIds.add(id);
+        }
+        updateSelectionUI();
+    }
+
+    function getSelectedIds() {
+        return Array.from(selectedIds);
+    }
+
+    function clearSelection() {
+        selectedIds.clear();
+        updateSelectionUI();
+        renderFiles();
     }
 
     function renderDetailsView(files) {
@@ -162,6 +188,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return `
                 <tr class="file-row" data-file-entry="true" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-file-name="${file.filename}">
                     <td>
+                        ${selectionMode ? `<input class="form-check-input me-2 select-checkbox" type="checkbox" data-file-id="${file.id}" ${selectedIds.has(file.id) ? 'checked' : ''}>` : ''}
                         <i class="bi ${iconClass} file-icon"></i>
                         ${file.filename}
                     </td>
@@ -206,6 +233,9 @@ document.addEventListener('DOMContentLoaded', function () {
             return `
                 <div class="col file-card-wrapper">
                     <div class="file-card" data-file-entry="true" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-file-name="${file.filename}">
+                        ${selectionMode ? `<div class="form-check">
+                            <input class="form-check-input select-checkbox" type="checkbox" data-file-id="${file.id}" ${selectedIds.has(file.id) ? 'checked' : ''}>
+                        </div>` : ''}
                         <div class="file-card-icon">
                             <i class="bi ${iconClass}"></i>
                         </div>
@@ -233,6 +263,164 @@ document.addEventListener('DOMContentLoaded', function () {
                 ${cards}
             </div>
         `;
+    }
+
+    function setSelectionMode(enabled) {
+        selectionMode = enabled;
+        viewModeButtons.forEach(btn => btn.disabled = enabled);
+        if (!enabled) {
+            selectedIds.clear();
+        }
+        updateSelectionUI();
+        renderFiles();
+    }
+
+    function updateSelectionUI() {
+        const count = selectedIds.size;
+        if (selectionCountLabel) {
+            selectionCountLabel.textContent = `${count} selecionado(s)`;
+            selectionCountLabel.classList.toggle('d-none', count === 0);
+        }
+
+        const bulkActions = document.getElementById('bulk-actions');
+        if (bulkActions) {
+            bulkActions.classList.toggle('d-none', !selectionMode || count === 0);
+        }
+
+        if (bulkDownloadButton) {
+            bulkDownloadButton.disabled = count === 0;
+        }
+        if (bulkDeleteButton) {
+            bulkDeleteButton.disabled = count === 0;
+        }
+
+        if (selectionToggleButton) {
+            if (selectionMode) {
+                selectionToggleButton.classList.add('active');
+                selectionToggleButton.innerHTML = '<i class="bi bi-x-circle me-1"></i> Cancelar seleção';
+            } else {
+                selectionToggleButton.classList.remove('active');
+                selectionToggleButton.innerHTML = '<i class="bi bi-check2-square me-1"></i> Selecionar';
+            }
+        }
+    }
+
+    if (selectionToggleButton) {
+        selectionToggleButton.addEventListener('click', () => {
+            setSelectionMode(!selectionMode);
+        });
+    }
+
+    function getFilenameFromDisposition(disposition) {
+        if (!disposition) return null;
+        const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i;
+        const matches = filenameRegex.exec(disposition);
+        if (matches && matches[1]) {
+            return matches[1].replace(/['"]/g, '');
+        }
+        return null;
+    }
+
+    if (bulkDownloadButton) {
+        bulkDownloadButton.addEventListener('click', async () => {
+            const ids = getSelectedIds();
+            if (!ids.length) {
+                return;
+            }
+            try {
+                setTransferStatus({
+                    active: true,
+                    message: 'Preparando download...',
+                    percent: null,
+                    variant: 'info',
+                    indeterminate: true
+                });
+                const response = await fetch('/api/files/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids })
+                });
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => ({}));
+                    throw new Error(payload.error || 'Falha ao preparar download');
+                }
+                const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition');
+                const defaultName = ids.length === 1
+                    ? (currentFiles.find(file => file.id === ids[0])?.filename || 'download')
+                    : 'arquivos.zip';
+                const filename = getFilenameFromDisposition(disposition) || defaultName;
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+                setTransferStatus({
+                    active: true,
+                    message: 'Download pronto!',
+                    percent: 100,
+                    detail: `${ids.length} item(ns) preparado(s).`,
+                    variant: 'success'
+                });
+                hideTransferStatus();
+            } catch (error) {
+                console.error('Bulk download failed', error);
+                setTransferStatus({
+                    active: true,
+                    message: 'Falha no download',
+                    percent: null,
+                    detail: error.message || 'Tente novamente mais tarde.',
+                    variant: 'danger',
+                    indeterminate: true
+                });
+                hideTransferStatus(4000);
+            }
+        });
+    }
+
+    if (bulkDeleteButton) {
+        bulkDeleteButton.addEventListener('click', async () => {
+            const ids = getSelectedIds();
+            if (!ids.length) {
+                return;
+            }
+            const confirmed = window.confirm(`Deseja realmente excluir ${ids.length} item(ns)? Esta ação não pode ser desfeita.`);
+            if (!confirmed) {
+                return;
+            }
+            toggleButtonSpinner(bulkDeleteButton, true);
+            try {
+                const response = await fetch('/api/files/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Falha ao excluir');
+                }
+                alert('Itens excluídos com sucesso.');
+                selectedIds.clear();
+                if (!selectionMode) {
+                    renderFiles();
+                } else {
+                    updateSelectionUI();
+                    fetchAndRenderFiles(currentParentId);
+                }
+            } catch (error) {
+                console.error('Bulk delete failed', error);
+                alert(error.message || 'Não foi possível excluir os itens.');
+            } finally {
+                toggleButtonSpinner(bulkDeleteButton, false);
+            }
+        });
     }
 
     async function fetchAndRenderFiles(parentId = null, folderName = null) {

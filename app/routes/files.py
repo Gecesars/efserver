@@ -238,6 +238,32 @@ def delete_file(file_id):
         return jsonify({'error': 'Failed to delete file'}), 500
 
 
+def _build_zip_for_file(file_obj):
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+    with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        folder_path = _resolve_disk_path(file_obj.owner_id, file_obj)
+        for root, dirs, files in os.walk(folder_path):
+            rel_root = os.path.relpath(root, folder_path)
+            if not files and not dirs:
+                folder_entry = file_obj.filename if rel_root == '.' else os.path.join(file_obj.filename, rel_root)
+                zipf.writestr(folder_entry.rstrip('/') + '/', '')
+            for fname in files:
+                abs_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(abs_path, folder_path)
+                arcname = os.path.join(file_obj.filename, rel_path)
+                zipf.write(abs_path, arcname=arcname)
+    return temp_zip_path
+
+
+def _cleanup_temp(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 @bp.route('/files/download/<int:file_id>', methods=['GET'])
 @login_required
 def download_file(file_id):
@@ -252,28 +278,11 @@ def download_file(file_id):
         if not os.path.exists(folder_path):
             return jsonify({'error': 'Folder not found'}), 404
 
-        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-        temp_zip_path = temp_zip.name
-        temp_zip.close()
-
-        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(folder_path):
-                rel_root = os.path.relpath(root, folder_path)
-                if not files and not dirs:
-                    folder_entry = file.filename if rel_root == '.' else os.path.join(file.filename, rel_root)
-                    zipf.writestr(folder_entry.rstrip('/') + '/', '')
-                for fname in files:
-                    abs_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(abs_path, folder_path)
-                    arcname = os.path.join(file.filename, rel_path)
-                    zipf.write(abs_path, arcname=arcname)
+        temp_zip_path = _build_zip_for_file(file)
 
         @after_this_request
         def cleanup(response):
-            try:
-                os.remove(temp_zip_path)
-            except OSError:
-                pass
+            _cleanup_temp(temp_zip_path)
             return response
 
         return send_file(
@@ -285,6 +294,105 @@ def download_file(file_id):
 
     folder_path = _resolve_disk_path(file.owner_id, file.parent)
     return send_from_directory(folder_path, file.filename, as_attachment=True)
+
+
+@bp.route('/files/download', methods=['POST'])
+@login_required
+def download_bulk():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({'error': 'No files selected'}), 400
+
+    permissions = _build_permission_cache()
+    files = File.query.filter(File.id.in_(ids)).all()
+
+    for file_obj in files:
+        if not _has_access(file_obj, permissions):
+            return jsonify({'error': f'Permission denied for {file_obj.filename}'}), 403
+
+    if len(files) == 1:
+        file_obj = files[0]
+        if file_obj.is_folder:
+            temp_zip_path = _build_zip_for_file(file_obj)
+
+            @after_this_request
+            def cleanup(response):
+                _cleanup_temp(temp_zip_path)
+                return response
+
+            return send_file(
+                temp_zip_path,
+                as_attachment=True,
+                download_name=f"{file_obj.filename}.zip",
+                mimetype='application/zip'
+            )
+
+        folder_path = _resolve_disk_path(file_obj.owner_id, file_obj.parent)
+        return send_from_directory(folder_path, file_obj.filename, as_attachment=True)
+
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+
+    with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for file_obj in files:
+            if file_obj.is_folder:
+                folder_path = _resolve_disk_path(file_obj.owner_id, file_obj)
+                for root, dirs, file_names in os.walk(folder_path):
+                    rel_root = os.path.relpath(root, folder_path)
+                    if not file_names and not dirs:
+                        folder_entry = file_obj.filename if rel_root == '.' else os.path.join(file_obj.filename, rel_root)
+                        zipf.writestr(folder_entry.rstrip('/') + '/', '')
+                    for fname in file_names:
+                        abs_path = os.path.join(root, fname)
+                        rel_path = os.path.relpath(abs_path, folder_path)
+                        arcname = os.path.join(file_obj.filename, rel_path)
+                        zipf.write(abs_path, arcname=arcname)
+            else:
+                folder_path = _resolve_disk_path(file_obj.owner_id, file_obj.parent)
+                abs_path = os.path.join(folder_path, file_obj.filename)
+                if os.path.exists(abs_path):
+                    zipf.write(abs_path, arcname=file_obj.filename)
+
+    @after_this_request
+    def cleanup(response):
+        _cleanup_temp(temp_zip_path)
+        return response
+
+    return send_file(
+        temp_zip_path,
+        as_attachment=True,
+        download_name='files.zip',
+        mimetype='application/zip'
+    )
+
+
+@bp.route('/files/delete', methods=['POST'])
+@login_required
+def delete_bulk():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({'error': 'No files selected'}), 400
+
+    permissions = _build_permission_cache()
+    files = File.query.filter(File.id.in_(ids)).all()
+
+    for file_obj in files:
+        if not _has_access(file_obj, permissions, require_write=True):
+            return jsonify({'error': f'Permission denied for {file_obj.filename}'}), 403
+
+    try:
+        for file_obj in files:
+            _delete_file_tree(file_obj)
+            db.session.delete(file_obj)
+        db.session.commit()
+        return jsonify({'status': 'deleted', 'ids': ids})
+    except Exception as exc:
+        current_app.logger.exception('Failed to bulk delete: %s', exc)
+        db.session.rollback()
+        return jsonify({'error': 'Failed to delete selected items'}), 500
 
 @bp.route('/folders', methods=['POST'])
 @login_required
