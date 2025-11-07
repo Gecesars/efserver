@@ -1,5 +1,7 @@
 from collections import defaultdict
-from flask import render_template, redirect, url_for, flash, Blueprint, request
+import os
+import shutil
+from flask import render_template, redirect, url_for, flash, Blueprint, request, current_app
 from flask_login import login_required
 from app.models import User, Role, File, UserFilePermission
 from app.forms import UserForm
@@ -118,7 +120,27 @@ def manage_user_permissions(id):
 @admin_required
 def delete_user(id):
     user = User.query.get_or_404(id)
-    db.session.delete(user)
-    db.session.commit()
-    flash('User deleted successfully.')
+    try:
+        from app.routes.files import _delete_file_tree
+
+        # Remove permissions where user is grantee
+        UserFilePermission.query.filter_by(user_id=user.id).delete()
+
+        # Remove files owned by the user (including nested children)
+        user_files = File.query.filter_by(owner_id=user.id).all()
+        for file_obj in user_files:
+            _delete_file_tree(file_obj)
+            db.session.delete(file_obj)
+
+        upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], f'user_{user.id}')
+        if os.path.isdir(upload_dir):
+            shutil.rmtree(upload_dir, ignore_errors=True)
+
+        db.session.delete(user)
+        db.session.commit()
+        flash('User deleted successfully.')
+    except Exception as exc:
+        current_app.logger.exception('Failed to delete user %s: %s', user.username, exc)
+        db.session.rollback()
+        flash('Failed to delete user. Please try again.', 'danger')
     return redirect(url_for('admin.list_users'))
