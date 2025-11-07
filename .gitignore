@@ -1,0 +1,37 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+
+# Environment / editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Flask / instance assets
+instance/uploads/
+instance/*.db
+instance/*.sqlite
+
+# Logs
+*.log
+
+# Migrations cache
+migrations/versions/__pycache__/
+
+# Compiled assets
+app/static/dist/
+
+# Coverage / testing
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Wheel / build artifacts
+build/
+dist/
+*.egg-info/
