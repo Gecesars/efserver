@@ -81,6 +81,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (file.is_folder) {
                     row.style.cursor = 'pointer';
                     row.addEventListener('click', (e) => {
+                        if (e.target.closest('.download-btn')) {
+                            return;
+                        }
                         e.stopPropagation();
                         const newBreadcrumb = {folderId: file.id, folderName: file.filename};
                         breadcrumbState.push(newBreadcrumb);
