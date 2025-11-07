@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const fileListBody = document.getElementById('file-list');
+    const fileContainer = document.getElementById('file-container');
     const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
     const uploadButton = document.getElementById('upload-button');
     const fileInput = document.getElementById('file-input');
@@ -7,7 +7,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const createFolderButton = document.getElementById('create-folder-button');
     const folderNameInput = document.getElementById('folder-name-input');
     const breadcrumbNav = document.getElementById('breadcrumb-nav');
-    const sortByDropdown = document.getElementById('sort-by-dropdown');
+    const sortOptions = document.querySelectorAll('.sort-option');
+    const viewModeButtons = document.querySelectorAll('[data-view-mode]');
     const uploadFolderModalElement = document.getElementById('uploadFolderModal');
     const uploadFolderModal = new bootstrap.Modal(uploadFolderModalElement);
     const uploadFolderButton = document.getElementById('upload-folder-button');
@@ -22,7 +23,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let currentParentId = null;
     let breadcrumbState = [{folderId: null, folderName: 'Home'}];
-    let currentSort = 'name';
+    let currentFiles = [];
+    let currentSort = { key: 'name', direction: 'asc' };
+    let currentViewMode = 'details';
 
     function formatDuration(seconds) {
         if (!seconds || !isFinite(seconds) || seconds <= 0) {
@@ -98,48 +101,73 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    async function fetchAndRenderFiles(parentId = null, folderName = null) {
-        currentParentId = parentId;
-        // Clear current list and show loading indicator
-        fileListBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Loading files...</td></tr>';
+    function applySorting(files) {
+        const sorted = [...files];
+        sorted.sort((a, b) => {
+            let valueA;
+            let valueB;
 
-        try {
-            let url = '/api/files';
-            const params = new URLSearchParams();
-            if (parentId) {
-                params.append('parent_id', parentId);
-            }
-            params.append('sort_by', currentSort);
-            url += `?${params.toString()}`;
-
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const files = await response.json();
-
-            // Clear loading indicator
-            fileListBody.innerHTML = '';
-
-            if (files.length === 0) {
-                fileListBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">This folder is empty.</td></tr>';
+            switch (currentSort.key) {
+                case 'date':
+                    valueA = new Date(a.created_at).getTime();
+                    valueB = new Date(b.created_at).getTime();
+                    break;
+                case 'type':
+                    const typeA = a.is_folder ? 'folder' : (a.filename.split('.').pop() || '').toLowerCase();
+                    const typeB = b.is_folder ? 'folder' : (b.filename.split('.').pop() || '').toLowerCase();
+                    valueA = typeA;
+                    valueB = typeB;
+                    break;
+                case 'name':
+                default:
+                    valueA = a.filename.toLowerCase();
+                    valueB = b.filename.toLowerCase();
             }
 
-            files.forEach(file => {
-                const row = document.createElement('tr');
-                
-                const iconClass = file.is_folder ? 'bi-folder-fill' : 'bi-file-earmark';
-                const fileType = file.is_folder ? 'Folder' : 'File';
-                const date = new Date(file.created_at).toLocaleDateString();
+            if (valueA < valueB) return currentSort.direction === 'asc' ? -1 : 1;
+            if (valueA > valueB) return currentSort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return sorted;
+    }
 
-                row.innerHTML = `
+    function renderFiles() {
+        if (!fileContainer) {
+            return;
+        }
+
+        const files = applySorting(currentFiles);
+
+        if (!files.length) {
+            fileContainer.innerHTML = `
+                <div class="placeholder text-center text-muted py-5">
+                    Esta pasta está vazia.
+                </div>
+            `;
+            return;
+        }
+
+        if (currentViewMode === 'details') {
+            renderDetailsView(files);
+        } else {
+            renderGridView(files);
+        }
+    }
+
+    function renderDetailsView(files) {
+        const rows = files.map(file => {
+            const iconClass = file.is_folder ? 'bi-folder-fill text-warning' : 'bi-file-earmark';
+            const fileType = file.is_folder ? 'Pasta' : (file.filename.split('.').pop() || 'Arquivo');
+            const date = new Date(file.created_at).toLocaleString();
+            return `
+                <tr class="file-row" data-file-entry="true" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-file-name="${file.filename}">
                     <td>
-                        <i class="bi ${iconClass} file-icon"></i> 
+                        <i class="bi ${iconClass} file-icon"></i>
                         ${file.filename}
                     </td>
                     <td>${fileType}</td>
                     <td>${date}</td>
-                    <td>
+                    <td class="text-end">
                         <button type="button" class="btn btn-sm btn-outline-secondary download-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
                             <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
                             <i class="bi bi-download"></i>
@@ -149,27 +177,95 @@ document.addEventListener('DOMContentLoaded', function () {
                             <i class="bi bi-trash"></i>
                         </button>
                     </td>
-                `;
+                </tr>
+            `;
+        }).join('');
 
-                if (file.is_folder) {
-                    row.style.cursor = 'pointer';
-                    row.addEventListener('click', (e) => {
-                        if (e.target.closest('.download-btn') || e.target.closest('.delete-btn')) {
-                            return;
-                        }
-                        e.stopPropagation();
-                        const newBreadcrumb = {folderId: file.id, folderName: file.filename};
-                        breadcrumbState.push(newBreadcrumb);
-                        updateBreadcrumb();
-                        fetchAndRenderFiles(file.id, file.filename);
-                    });
-                }
+        fileContainer.innerHTML = `
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Tipo</th>
+                            <th>Modificado</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
 
-                fileListBody.appendChild(row);
-            });
+    function renderGridView(files) {
+        const cards = files.map(file => {
+            const iconClass = file.is_folder ? 'bi-folder-fill text-warning' : 'bi-file-earmark-text';
+            const fileType = file.is_folder ? 'Pasta' : (file.filename.split('.').pop() || 'Arquivo');
+            const date = new Date(file.created_at).toLocaleDateString();
+            return `
+                <div class="col file-card-wrapper">
+                    <div class="file-card" data-file-entry="true" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-file-name="${file.filename}">
+                        <div class="file-card-icon">
+                            <i class="bi ${iconClass}"></i>
+                        </div>
+                        <div class="file-card-body">
+                            <div class="file-card-name" title="${file.filename}">${file.filename}</div>
+                            <div class="file-card-meta">${fileType} · ${date}</div>
+                        </div>
+                        <div class="file-card-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary download-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                                <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                                <i class="bi bi-download"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-danger delete-btn" data-file-id="${file.id}" data-is-folder="${file.is_folder}" data-filename="${file.filename}">
+                                <span class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        fileContainer.innerHTML = `
+            <div class="row row-cols-2 row-cols-md-3 row-cols-lg-5 g-3 file-grid">
+                ${cards}
+            </div>
+        `;
+    }
+
+    async function fetchAndRenderFiles(parentId = null, folderName = null) {
+        currentParentId = parentId;
+        if (fileContainer) {
+            fileContainer.innerHTML = `
+                <div class="placeholder text-center text-muted py-5">
+                    Carregando arquivos...
+                </div>
+            `;
+        }
+
+        try {
+            let url = '/api/files';
+            const params = new URLSearchParams();
+            if (parentId) {
+                params.append('parent_id', parentId);
+            }
+            const response = await fetch(`${url}?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            currentFiles = await response.json();
+            renderFiles();
         } catch (error) {
             console.error('Failed to fetch files:', error);
-            fileListBody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Failed to load files.</td></tr>';
+            if (fileContainer) {
+                fileContainer.innerHTML = `
+                    <div class="placeholder text-center text-danger py-5">
+                        Não foi possível carregar os arquivos.
+                    </div>
+                `;
+            }
         }
     }
 
@@ -225,11 +321,32 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    sortByDropdown.addEventListener('click', (e) => {
-        if (e.target.tagName === 'A') {
-            currentSort = e.target.dataset.sort;
-            fetchAndRenderFiles(currentParentId);
-        }
+    viewModeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const mode = button.dataset.viewMode;
+            if (mode === currentViewMode) {
+                return;
+            }
+            currentViewMode = mode;
+            viewModeButtons.forEach(btn => btn.classList.toggle('active', btn === button));
+            renderFiles();
+        });
+    });
+
+    sortOptions.forEach(option => {
+        option.addEventListener('click', (event) => {
+            event.preventDefault();
+            const { sortKey, sortDirection } = option.dataset;
+            currentSort = {
+                key: sortKey || 'name',
+                direction: sortDirection || 'asc'
+            };
+            const sortLabel = document.getElementById('current-sort-label');
+            if (sortLabel) {
+                sortLabel.textContent = option.textContent.trim();
+            }
+            renderFiles();
+        });
     });
 
     breadcrumbNav.addEventListener('click', (e) => {
@@ -519,7 +636,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    fileListBody.addEventListener('click', async (e) => {
+    fileContainer.addEventListener('click', async (e) => {
         const downloadBtn = e.target.closest('.download-btn');
         if (downloadBtn) {
             e.stopPropagation();
@@ -559,6 +676,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
             await deleteItem(deleteBtn, fileId, isFolder, filename);
+        }
+
+        const entry = e.target.closest('[data-file-entry="true"]');
+        if (entry && entry.dataset.isFolder === 'true' && !e.target.closest('.download-btn') && !e.target.closest('.delete-btn')) {
+            e.stopPropagation();
+            const folderId = parseInt(entry.dataset.fileId, 10);
+            const folderName = entry.dataset.fileName;
+            breadcrumbState.push({ folderId, folderName });
+            updateBreadcrumb();
+            fetchAndRenderFiles(folderId);
         }
     });
 });

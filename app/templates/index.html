@@ -1,26 +1,36 @@
 {% extends "base.html" %}
 
 {% block content %}
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h4">My Files</h2>
-        <div class="d-flex align-items-center">
-            <div class="dropdown me-2">
-                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="sort-by-dropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    Sort by
-                </button>
-                <ul class="dropdown-menu" aria-labelledby="sort-by-dropdown">
-                    <li><a class="dropdown-item" href="#" data-sort="name">Name</a></li>
-                    <li><a class="dropdown-item" href="#" data-sort="date">Date Modified</a></li>
-                </ul>
-            </div>
-            <button class="btn btn-primary me-2" type="button" data-bs-toggle="modal" data-bs-target="#uploadModal">
-                <i class="bi bi-cloud-arrow-up-fill me-1"></i> Upload File
+    <div class="explorer-toolbar d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="btn-group" role="group" aria-label="View mode">
+            <button type="button" class="btn btn-outline-secondary active" data-view-mode="details" aria-label="Detalhes">
+                <i class="bi bi-list-ul"></i>
             </button>
-            <button class="btn btn-primary me-2" type="button" data-bs-toggle="modal" data-bs-target="#uploadFolderModal">
-                <i class="bi bi-folder-symlink-fill me-1"></i> Upload Folder
+            <button type="button" class="btn btn-outline-secondary" data-view-mode="grid" aria-label="Ícones grandes">
+                <i class="bi bi-grid-3x3-gap"></i>
             </button>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="sortMenu" data-bs-toggle="dropdown" aria-expanded="false">
+                Ordenar: <span id="current-sort-label">Nome (A-Z)</span>
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="sortMenu">
+                <li><a class="dropdown-item sort-option" href="#" data-sort-key="name" data-sort-direction="asc">Nome (A-Z)</a></li>
+                <li><a class="dropdown-item sort-option" href="#" data-sort-key="name" data-sort-direction="desc">Nome (Z-A)</a></li>
+                <li><a class="dropdown-item sort-option" href="#" data-sort-key="date" data-sort-direction="desc">Data (mais recente)</a></li>
+                <li><a class="dropdown-item sort-option" href="#" data-sort-key="date" data-sort-direction="asc">Data (mais antiga)</a></li>
+                <li><a class="dropdown-item sort-option" href="#" data-sort-key="type" data-sort-direction="asc">Tipo</a></li>
+            </ul>
+        </div>
+        <div class="ms-auto d-flex flex-wrap gap-2">
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#newFolderModal">
-                <i class="bi bi-folder-plus me-1"></i> New Folder
+                <i class="bi bi-folder-plus me-1"></i> Nova Pasta
+            </button>
+            <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-cloud-arrow-up-fill me-1"></i> Upload Arquivo
+            </button>
+            <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#uploadFolderModal">
+                <i class="bi bi-folder-symlink-fill me-1"></i> Upload Pasta
             </button>
         </div>
     </div>
@@ -60,25 +70,8 @@
         </ol>
     </nav>
 
-    <div class="card">
-        <div class="card-body">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th scope="col">Name</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Date Modified</th>
-                        <th scope="col">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="file-list">
-                    <!-- File and folder list will be dynamically inserted here by JavaScript -->
-                    <tr>
-                        <td colspan="4" class="text-center text-muted">Loading files...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+    <div id="file-container" class="file-container mb-4">
+        <div class="placeholder text-center text-muted py-5">Carregando arquivos...</div>
     </div>
 
 <!-- Upload Modal -->

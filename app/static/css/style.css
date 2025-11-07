@@ -14,3 +14,52 @@ body {
     font-size: 1.2rem;
     margin-right: 10px;
 }
+
+.explorer-toolbar .btn.active {
+    background-color: #0d6efd;
+    color: #fff;
+}
+
+.file-container .table {
+    margin-bottom: 0;
+}
+
+.file-grid .file-card {
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.file-grid .file-card:hover {
+    border-color: #0d6efd;
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.05);
+}
+
+.file-card-icon {
+    font-size: 2rem;
+    color: #6c757d;
+}
+
+.file-card-name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-card-meta {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.file-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: auto;
+}
