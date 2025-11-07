@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request, current_app, send_from_directory
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from app.models import File, UserFilePermission
@@ -7,33 +7,89 @@ import os
 
 bp = Blueprint('files', __name__)
 
+
+def _build_permission_cache():
+    permissions = UserFilePermission.query.filter_by(user_id=current_user.id).all()
+    return {permission.file_id: permission for permission in permissions}
+
+
+def _has_access(file_obj, permissions, require_write=False):
+    if file_obj.owner_id == current_user.id:
+        return True
+
+    node = file_obj
+    while node is not None:
+        permission = permissions.get(node.id)
+        if permission:
+            if require_write:
+                if permission.can_write:
+                    return True
+            else:
+                if permission.can_read or permission.can_write:
+                    return True
+        node = node.parent
+
+    return False
+
+
+def _resolve_disk_path(owner_id, folder=None):
+    base_path = os.path.join(current_app.config['UPLOAD_FOLDER'], f'user_{owner_id}')
+    if folder is None:
+        return base_path
+
+    segments = []
+    node = folder
+    while node is not None:
+        segments.append(node.filename)
+        node = node.parent
+
+    if segments:
+        base_path = os.path.join(base_path, *reversed(segments))
+
+    return base_path
+
+
+def _sanitize_folder_name(name):
+    if not name:
+        return ''
+    cleaned = name.strip()
+    if not cleaned or cleaned in {'.', '..'}:
+        return ''
+    if '/' in cleaned or '\\' in cleaned:
+        return ''
+    return cleaned
+
+
 @bp.route('/files', methods=['GET'])
 @login_required
 def list_files():
     parent_id = request.args.get('parent_id', default=None, type=int)
     sort_by = request.args.get('sort_by', default='name', type=str)
+    permissions = _build_permission_cache()
 
-    # Query for files and folders owned by the user
-    owned_files = File.query.filter_by(owner_id=current_user.id, parent_id=parent_id)
-
-    # Query for files and folders shared with the user
-    shared_files = db.session.query(File).join(UserFilePermission).filter(
-        UserFilePermission.user_id == current_user.id,
-        UserFilePermission.can_read == True,
-        File.parent_id == parent_id
-    )
-
-    # Combine the queries
-    query = owned_files.union(shared_files)
-
-    if sort_by == 'date':
-        query = query.order_by(File.is_folder.desc(), File.created_at.desc())
+    if parent_id is not None:
+        parent = File.query.get_or_404(parent_id)
+        if not parent.is_folder:
+            return jsonify({'error': 'Invalid folder'}), 400
+        if not _has_access(parent, permissions):
+            return jsonify({'error': 'Permission denied'}), 403
+        items = File.query.filter_by(parent_id=parent_id).all()
     else:
-        query = query.order_by(File.is_folder.desc(), File.filename.asc())
+        candidates = File.query.filter_by(parent_id=None).all()
+        items = []
+        for file_obj in candidates:
+            if file_obj.owner_id == current_user.id or _has_access(file_obj, permissions):
+                items.append(file_obj)
 
-    items = [item.to_dict() for item in query.all()]
-    
-    return jsonify(items)
+    def _sort_key(file_obj):
+        folder_key = 0 if file_obj.is_folder else 1
+        if sort_by == 'date':
+            return (folder_key, -file_obj.created_at.timestamp())
+        return (folder_key, file_obj.filename.lower())
+
+    items.sort(key=_sort_key)
+
+    return jsonify([item.to_dict() for item in items])
 
 @bp.route('/files/upload', methods=['POST'])
 @login_required
@@ -47,79 +103,76 @@ def upload_file():
 
     parent_id = request.form.get('parent_id', type=int)
     relative_path = request.form.get('relative_path')
+    permissions = _build_permission_cache()
 
-    if file:
-        filename = secure_filename(file.filename)
-        
-        user_upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], f'user_{current_user.id}')
+    target_folder = None
+    storage_owner_id = current_user.id
 
-        if relative_path:
-            path_parts = relative_path.split('/')
-            if len(path_parts) > 1:
-                folder_path = os.path.join(*path_parts[:-1])
-                user_upload_path = os.path.join(user_upload_path, folder_path)
-                
-                # Create folders in DB
-                current_parent_id = parent_id
-                for part in path_parts[:-1]:
-                    folder = File.query.filter_by(owner_id=current_user.id, parent_id=current_parent_id, filename=part, is_folder=True).first()
-                    if not folder:
-                        new_folder = File(
-                            filename=part,
-                            owner_id=current_user.id,
-                            parent_id=current_parent_id,
-                            is_folder=True
-                        )
-                        db.session.add(new_folder)
-                        db.session.commit()
-                        current_parent_id = new_folder.id
-                    else:
-                        current_parent_id = folder.id
-                parent_id = current_parent_id
+    if parent_id is not None:
+        target_folder = File.query.get_or_404(parent_id)
+        if not target_folder.is_folder:
+            return jsonify({'error': 'Invalid destination'}), 400
+        if not _has_access(target_folder, permissions, require_write=True):
+            return jsonify({'error': 'Permission denied'}), 403
+        storage_owner_id = target_folder.owner_id
 
-        os.makedirs(user_upload_path, exist_ok=True)
-        file_path = os.path.join(user_upload_path, filename)
-        file.save(file_path)
+    filename = secure_filename(file.filename)
+    destination_path = _resolve_disk_path(storage_owner_id, target_folder)
 
-        # Create new file record in DB
-        new_file = File(
-            filename=filename, 
-            owner_id=current_user.id, 
-            parent_id=parent_id,
-            is_folder=False
-        )
-        db.session.add(new_file)
-        db.session.commit()
+    if relative_path:
+        path_parts = [part for part in relative_path.split('/') if part]
+        if len(path_parts) > 1:
+            current_parent_id = parent_id
+            for raw_part in path_parts[:-1]:
+                part = _sanitize_folder_name(raw_part)
+                if not part:
+                    continue
+                folder = File.query.filter_by(
+                    owner_id=storage_owner_id,
+                    parent_id=current_parent_id,
+                    filename=part,
+                    is_folder=True
+                ).first()
+                if not folder:
+                    folder = File(
+                        filename=part,
+                        owner_id=storage_owner_id,
+                        parent_id=current_parent_id,
+                        is_folder=True
+                    )
+                    db.session.add(folder)
+                    db.session.commit()
+                current_parent_id = folder.id
+                destination_path = os.path.join(destination_path, part)
+            parent_id = current_parent_id
 
-        return jsonify(new_file.to_dict()), 201
-    
-    return jsonify({'error': 'File upload failed'}), 500
+    os.makedirs(destination_path, exist_ok=True)
+    file_path = os.path.join(destination_path, filename)
+    file.save(file_path)
 
-from flask import Blueprint, jsonify, request, current_app, send_from_directory
+    new_file = File(
+        filename=filename,
+        owner_id=storage_owner_id,
+        parent_id=parent_id,
+        is_folder=False
+    )
+    db.session.add(new_file)
+    db.session.commit()
+
+    return jsonify(new_file.to_dict()), 201
+
 
 @bp.route('/files/download/<int:file_id>', methods=['GET'])
 @login_required
 def download_file(file_id):
+    permissions = _build_permission_cache()
     file = File.query.get_or_404(file_id)
 
-    # Check if the user owns the file
-    if file.owner_id != current_user.id:
+    if not _has_access(file, permissions):
         return jsonify({'error': 'Permission denied'}), 403
 
-    # Construct the path to the file
-    user_upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], f'user_{current_user.id}')
-    
-    # Handle nested folders
-    if file.parent:
-        path_parts = []
-        parent = file.parent
-        while parent:
-            path_parts.append(parent.filename)
-            parent = parent.parent
-        
-        user_upload_path = os.path.join(user_upload_path, *reversed(path_parts))
-
-    return send_from_directory(user_upload_path, file.filename, as_attachment=True)
+    folder_path = _resolve_disk_path(file.owner_id, file.parent)
+    return send_from_directory(folder_path, file.filename, as_attachment=True)
 
 @bp.route('/folders', methods=['POST'])
 @login_required
@@ -127,17 +180,40 @@ def create_folder():
     data = request.get_json()
     folder_name = data.get('folder_name')
     parent_id = data.get('parent_id')
+    if parent_id is not None:
+        try:
+            parent_id = int(parent_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid parent id'}), 400
+    permissions = _build_permission_cache()
+    parent_folder = None
+    owner_id = current_user.id
 
     if not folder_name:
         return jsonify({'error': 'Folder name is required'}), 400
 
+    if parent_id is not None:
+        parent_folder = File.query.get_or_404(parent_id)
+        if not parent_folder.is_folder:
+            return jsonify({'error': 'Invalid parent folder'}), 400
+        if not _has_access(parent_folder, permissions, require_write=True):
+            return jsonify({'error': 'Permission denied'}), 403
+        owner_id = parent_folder.owner_id
+
+    sanitized_name = _sanitize_folder_name(folder_name)
+    if not sanitized_name:
+        return jsonify({'error': 'Folder name is invalid'}), 400
+
     new_folder = File(
-        filename=folder_name,
-        owner_id=current_user.id,
+        filename=sanitized_name,
+        owner_id=owner_id,
         parent_id=parent_id,
         is_folder=True
     )
     db.session.add(new_folder)
     db.session.commit()
+
+    folder_path = _resolve_disk_path(owner_id, parent_folder)
+    os.makedirs(os.path.join(folder_path, sanitized_name), exist_ok=True)
 
     return jsonify(new_folder.to_dict()), 201

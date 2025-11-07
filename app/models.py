@@ -98,6 +98,15 @@ class File(db.Model):
 
     permissions = db.relationship('UserFilePermission', back_populates='file', lazy='dynamic')
 
+    def get_full_path(self):
+        """Returns a unix-like representation of the folder hierarchy."""
+        parts = [self.filename]
+        parent = self.parent
+        while parent is not None:
+            parts.append(parent.filename)
+            parent = parent.parent
+        return '/' + '/'.join(reversed(parts))
+
     def to_dict(self):
         return {
             'id': self.id,

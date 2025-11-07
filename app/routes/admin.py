@@ -1,12 +1,38 @@
+from collections import defaultdict
 from flask import render_template, redirect, url_for, flash, Blueprint, request
 from flask_login import login_required
-from app.models import User, Role
+from app.models import User, Role, File, UserFilePermission
 from app.forms import UserForm
 from app import db
 
 bp = Blueprint('admin', __name__)
 
 from app.decorators import admin_required
+
+
+def _build_folder_rows():
+    folders = File.query.filter_by(is_folder=True).all()
+    children = defaultdict(list)
+
+    for folder in folders:
+        children[folder.parent_id].append(folder)
+
+    for siblings in children.values():
+        siblings.sort(key=lambda f: f.filename.lower())
+
+    ordered = []
+
+    def traverse(parent_id=None, depth=0):
+        for folder in children.get(parent_id, []):
+            ordered.append({
+                'folder': folder,
+                'depth': depth,
+                'path': folder.get_full_path()
+            })
+            traverse(folder.id, depth + 1)
+
+    traverse()
+    return ordered
 
 
 @bp.route('/')
@@ -54,15 +80,14 @@ def edit_user(id):
 @login_required
 @admin_required
 def manage_user_permissions(id):
-    from app.models import User, Role, File, UserFilePermission
     user = User.query.get_or_404(id)
-    folders = File.query.filter_by(is_folder=True).all()
+    folder_rows = _build_folder_rows()
 
     if request.method == 'POST':
-        # Clear existing permissions
         UserFilePermission.query.filter_by(user_id=user.id).delete()
 
-        for folder in folders:
+        for entry in folder_rows:
+            folder = entry['folder']
             read_permission = request.form.get(f'read_{folder.id}')
             write_permission = request.form.get(f'write_{folder.id}')
 
@@ -77,10 +102,16 @@ def manage_user_permissions(id):
 
         db.session.commit()
         flash('Permissions updated successfully.')
-        return redirect(url_for('admin.list_users'))
+        return redirect(url_for('admin.manage_user_permissions', id=user.id))
 
     user_permissions = {p.file_id: p for p in user.permissions.all()}
-    return render_template('admin/manage_permissions.html', user=user, folders=folders, user_permissions=user_permissions, title='Manage Permissions')
+    return render_template(
+        'admin/manage_permissions.html',
+        user=user,
+        folder_rows=folder_rows,
+        user_permissions=user_permissions,
+        title='Manage Permissions'
+    )
 
 @bp.route('/users/delete/<int:id>', methods=['POST'])
 @login_required
