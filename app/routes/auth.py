@@ -2,7 +2,7 @@ from flask import render_template, redirect, url_for, flash, Blueprint
 from flask_login import login_user, logout_user, current_user
 from app import db
 from app.models import User
-from app.forms import LoginForm
+from app.forms import LoginForm, RegistrationForm
 
 bp = Blueprint('auth', __name__)
 
@@ -24,3 +24,17 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for('main.index'))
+
+@bp.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('main.index'))
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        user = User(username=form.username.data)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Registration successful. Please log in.')
+        return redirect(url_for('auth.login'))
+    return render_template('register.html', title='Register', form=form)
